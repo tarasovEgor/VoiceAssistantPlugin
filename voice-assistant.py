@@ -1,4 +1,4 @@
-# Tech-support line automatisation plugin
+# Tech-support line automation plugin
 # author: Tarasov Egor
 
 import json
@@ -166,9 +166,9 @@ def zammad_integration(issue_report):
 
 def main():
     ami_client = AMIClient(address='asterisk_server_ip', port=5038)
-    ami_client.login(username='your_ami_username', secret='your_ami_secret')
+    ami_client.login(username='ami_username', secret='ami_secret')
 
-    chat_app = ChatApp(api_key='your_openai_api_key')
+    chat_app = ChatApp(api_key='openai_api_key')
 
     def on_event(event):
         if event.name == 'Newstate' and event.get('ChannelStateDesc') == 'Ringing':
