@@ -1,1 +1,1 @@
-# Tech-support line automatisation plugin
+# Tech-support line automation plugin
