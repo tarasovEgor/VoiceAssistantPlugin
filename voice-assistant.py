@@ -1,3 +1,6 @@
+# Tech-support line automatisation plugin
+# author: Tarasov Egor
+
 import json
 import openai
 import os
