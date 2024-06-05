@@ -102,7 +102,14 @@ def handle_incoming_call(event, ami_client, chat_app):
             convenient_time = collect_dtmf(ami_client, channel)
             
             # Формирование отчета о проблеме с полученными данными
-            issue_report = "User INN: {}\nUser Name: {}\nPhone Number: {}\nIssue Description: {}\nConvenient Time: {}\nChatGPT Response: {}".format(user_inn, user_name, phone_number, issue_description, convenient_time, response)
+            issue_report = "User INN: {}\nUser Name: {}\nPhone Number: {}\nIssue Description: {}\nConvenient Time: {}\nChatGPT Response: {}".format(
+                user_inn,
+                user_name,
+                phone_number,
+                issue_description,
+                convenient_time,
+                response
+            )
             
             # Интеграция с Zammad Helpdesk
             zammad_integration(issue_report)
@@ -165,8 +172,8 @@ def zammad_integration(issue_report):
 
 
 def main():
-    ami_client = AMIClient(address='asterisk_server_ip', port=5038)
-    ami_client.login(username='ami_username', secret='ami_secret')
+    ami_client = AMIClient(address='sip.srv4tech.ru', port=5038)
+    ami_client.login(username='VA', secret='e9099de577210874-cae6c9fc470ee3d78a73781b')
 
     chat_app = ChatApp(api_key='openai_api_key')
 
