@@ -1,15 +1,25 @@
 # Tech-support line automation plugin
-# Ключ для общения с СhatGPT можно получить на https://vsegpt.ru
 # author: Tarasov Egor
 
 import os
-import openai
-import asterisk.manager
+import requests
 
 from typing import Any
 from vacore import VACore
-from asterisk.manager import Manager
-from plugin_boltalka_vsegpt import new_chat, boltalka
+
+from g4f.client import Client
+from g4f.Provider import RetryProvider, Phind, DeepInfra, Liaobots, Aichatos, You, AItianhuSpace
+
+zammad_user_info = {}
+
+ZAMMAD_URL = 'https://help.it4tech.ru'
+ZAMMAD_API_KEY = ''
+
+ZAMMAD_USER_INN = ''
+ZAMMAD_USER_NAME = ''
+ZAMMAD_USER_EMAIL = ''
+ZAMMAD_USER_ISSUE = ''
+ZAMMAD_USER_PHONE_NUMBER = ''
 
 #функция на старте
 def start(core: VACore):
@@ -18,138 +28,151 @@ def start(core: VACore):
         "version": "1.0",
         "require_online": True,
         "description": "Система позволяет искать решения для клиентских проблем с помощью ChatGPT.\n"
-                       "Если ответ от ChatGPT - неудовлетворительный, система формирует заявку в Zammad Helpdesk.\n",
-        "options_label": {
-            "apiKey": "API-ключ VseGPT для доступа к ChatGPT",
-            "apiBaseUrl": "URL для OpenAI (нужен, если вы связываетесь с другим сервером, эмулирующим OpenAI)",
-            "system": "Вводная строка, задающая характер ответов помощника.",
-            "model": "ID нейросетевой модели с сайта Vsegpt",
-            "model_spravka": "ID нейросетевой модели с сайта Vsegpt для справок (точных фактов)",
-        },               
+                       "Если ответ от ChatGPT - неудовлетворительный, система формирует заявку в Zammad Helpdesk.\n",           
         "commands": {
-            "задать вопрос|начать" : run_start,
+            "поддержка" : run_start,
         }
     }
     return manifest
 
 modname = os.path.basename(__file__)[:-3]
 
-def run_start(core: VACore):
-    manager = connect_to_asterisk()
 
-    #Ожидание входящего звонка
-    while True:
-        event = manager.wait_for_event('Newchannel')
-        if event and event.get('Channel'):
-            channel = event.get('Channel')
-            print(f"New call on channel: {channel}")
-
-            core.context_set(handle_incoming_call)
-            
-            break
-
-    manager.close()
+def start_with_options(core:VACore, manifest:dict):
+    pass
 
 
-# Подключение к серверу Asterisk
-def connect_to_asterisk():
-    manager = asterisk.manager.Manager()
-    manager.connect('asterisk-server-ip-address')
-    manager.login('username', 'password')
-    return manager
+def run_start(core: VACore, phrase: str):
+    core.play_voice_assistant_speech("Для начала назовите ваш ИНН:")
+    core.context_set(handle_current_dialogue)
 
 
-# Перенаправление звонка в случае несовпадения ИНН
-def redirect_call(manager, channel, context, extension, priority):
-    try:
-        manager.redirect(channel=channel, context=context, exten=extension, priority=priority)
-        print(f"Call redirected to {context}, extension {extension}, priority {priority}")
-    except asterisk.manager.ManagerSocketException as e:
-        print(f"Error connecting to the manager: {e}")
-    except asterisk.manager.ManagerAuthException as e:
-        print(f"Error logging in to the manager: {e}")
-    except asterisk.manager.ManagerException as e:
-        print(f"Error: {e}")
+def handle_current_dialogue(core: VACore, inn: str):
+    if user_is_authorized(inn):
+        core.play_voice_assistant_speech("Хорошо, опишите вашу проблему.")
+        core.context_set(ask_chatGPT, 20)
 
 
-# Обработка входящего звонка
-def handle_incoming_call(core: VACore, phrase: str, manager: Manager, channel: Any):
-    core.play_voice_assistant_speech("Добрый день! Для начала назовите ваш ИНН")
-    if user_is_authorized(phrase):
-        if phrase: 
-            core.context_set(ask_chat_GPT)
-        core.play_voice_assistant_speech("Спасибо за обращение в нашу службу поддержки!")
+def ask_chatGPT(core: VACore, phrase: str) -> str:
+    client = Client(
+        provider=RetryProvider([Phind, You, AItianhuSpace], shuffle=False)
+    )
+    response = client.chat.completions.create(
+        model="",
+        messages=[{"role": "user", "content": phrase}],
+    )
+    core.play_voice_assistant_speech(response.choices[0].message.content)
+    core.play_voice_assistant_speech("Удалось решить проблему? да/нет")
+    core.context_set(check_answer_quality, 20)
+
+
+def check_answer_quality(core: VACore, phrase: str):
+    if (phrase.lower() != "да"):
+        core.play_voice_assistant_speech("Хорошо, повторите ваш вопрос")
+        core.context_set(ask_issue, 20)
     else:
-        core.play_voice_assistant_speech("К сожалению ИНН не был найден в нашей базе, перенаправляю ваш звонок на специалиста.")
-        redirect_call(manager, channel, 'incoming', '+7XXXXXXXXXX', 1)
-
-
-def ask_chat_GPT(core: VACore, phrase: str):
-    options = core.plugin_options(modname)
-
-    openai.api_key = options["apiKey"]
-    openai.api_base = options["apiBaseUrl"]
-
-    new_chat(core)
-
-    core.play_voice_assistant_speech("Хорошо, опишите вашу проблему.")
-
-    if phrase:
-        core.play_voice_assistant_speech("Обрабатываю запрос")
-        core.context_set(boltalka, 20)
-        core.play_voice_assistant_speech("Помог ли вам данный ответ? Да или нет")
-        if phrase == "да":
-            core.play_voice_assistant_speech("Отлично, всегда рада помочь!")
-        elif phrase == "нет":
-            core.play_voice_assistant_speech("Извините, попробуйте задать вопрос повторно")
-            core.context_set(boltalka, 20)
-        else:
-            core.play_voice_assistant_speech("Хорошо, формирую заявку в Zammad Helpdesk")
-            core.context_set(form_zammad_request)
-            return
-    else:
-        boltalka(core, phrase)
+        core.play_voice_assistant_speech("Была рада помочь!")
 
 
 def user_is_authorized(phrase: str):
     # Временная заглушка, интеграция с бд пока что не настроена
-    inn = None # конвертация фразы в числовой формат
-    db = None
-    if inn in db:
+    inn = 1
+    if inn == 1:
         return True
     return False
 
+
 # Формирование заявки в Zammad Helpdesk
-def form_zammad_request(core: VACore, phrase: str):
-    core.play_voice_assistant_speech("Назовите ваше имя")
-    user_name = phrase
-
-    core.play_voice_assistant_speech("Назовите ваш ИНН")
-    user_inn = phrase
-
-    core.play_voice_assistant_speech("Назовите ваш номер телефона")
-    phone_number = phrase
-
-    core.play_voice_assistant_speech("Опишите проблему")
-    issue_description = phrase
-
-    core.play_voice_assistant_speech("В какое время вам будет удобно связаться с нашим специалистом?")
-    convenient_time = phrase
-
-    issue_report = "User INN: {}\nUser Name: {}\nPhone Number: {}\nIssue Description: {}\nConvenient Time: {}".format(
-        user_inn,
-        user_name,
-        phone_number,
-        issue_description,
-        convenient_time
-    )
-
-    post_zammad_request(issue_report)
-
-    core.play_voice_assistant_speech("Заявка успешно оформлена, ожидайте, скоро с вами свяжется наш специалист")
-    return
+def submit_to_zammad(client_inn: str, zammad_user_info: dict, question: str) -> None:
+    headers = {
+        'Authorization': f'Bearer {ZAMMAD_API_KEY}',
+        'Content-Type': 'application/json'
+    }
+    payload = {
+        'title': f'Question from {client_inn}',
+        'group': 'Техническая поддержка',
+        'article': {
+            'subject': 'Support request',
+            'body': question,
+            'type': 'note',
+            'internal': False
+        },
+        'customer': {
+            'firstname': zammad_user_info['name'],
+            'email': zammad_user_info['email'],
+            'phone': zammad_user_info['phone']
+        },
+        'note': 'forwarded by bot'
+    }
+    response = requests.post(ZAMMAD_URL + '/api/v1/tickets', headers=headers, json=payload)
+    if response.status_code != 201:
+        raise Exception(f"Failed to submit to Zammad: {response.text}")
 
 
-# Отправка заявки в Zammad Helpdesk (пока что не реализована)
-def post_zammad_request(issue_report: str):
-    pass
+# Функции записи информации о пользователе для формирования тикета в Zammad Helpdesk.
+
+
+def ask_issue(core: VACore, phrase: str):
+    if phrase:
+        global ZAMMAD_USER_ISSUE
+        ZAMMAD_USER_ISSUE = phrase
+        core.play_voice_assistant_speech("Вопрос сохранен.")
+        core.play_voice_assistant_speech("Назовите ваш ИНН.")
+        core.context_set(ask_inn, 20)
+    else:
+        core.play_voice_assistant_speech("Не поняла, повторите, пожалуйста.")
+        core.context_set(ask_issue, 20)
+
+
+def ask_inn(core: VACore, phrase: str):
+    if phrase:
+        global ZAMMAD_USER_INN
+        ZAMMAD_USER_INN = phrase
+        core.play_voice_assistant_speech("ИНН сохранен.")
+        core.play_voice_assistant_speech("Назовите ваши ФИО.")
+        core.context_set(ask_user_name, 20)
+    else:
+        core.play_voice_assistant_speech("Не поняла, повторите, пожалуйста.")
+        core.context_set(ask_inn, 20)
+
+
+def ask_user_name(core: VACore, phrase: str):
+    if phrase:
+        global ZAMMAD_USER_NAME
+        ZAMMAD_USER_NAME = phrase
+        core.play_voice_assistant_speech("ФИО сохранены.")
+        core.play_voice_assistant_speech("Назовите вашу электронную почту.")
+        core.context_set(ask_user_email, 20)
+    else:
+        core.play_voice_assistant_speech("Не поняла, повторите, пожалуйста.")
+        core.context_set(ask_user_name, 20)
+
+
+def ask_user_email(core: VACore, phrase: str):
+    if phrase:
+        global ZAMMAD_USER_EMAIL
+        ZAMMAD_USER_EMAIL = phrase
+        core.play_voice_assistant_speech("Адрес эл. почты сохранен.")
+        core.play_voice_assistant_speech("Назовите ваш номер телефона.")
+        core.context_set(ask_user_phone_number, 20)
+    else:
+        core.play_voice_assistant_speech("Не поняла, повторите, пожалуйста.")
+        core.context_set(ask_user_email, 20)
+
+
+def ask_user_phone_number(core: VACore, phrase: str):
+    if phrase:
+        global ZAMMAD_USER_PHONE_NUMBER
+        ZAMMAD_USER_PHONE_NUMBER = phrase
+        core.play_voice_assistant_speech("Номер телефона сохранен.")
+        core.play_voice_assistant_speech("Формирую заявку в Zammad Helpdesk...")
+
+        global zammad_user_info
+        zammad_user_info['name'] = ZAMMAD_USER_NAME
+        zammad_user_info['email'] = ZAMMAD_USER_EMAIL
+        zammad_user_info['phone'] = ZAMMAD_USER_PHONE_NUMBER
+
+        submit_to_zammad(ZAMMAD_USER_INN, zammad_user_info, ZAMMAD_USER_ISSUE)
+
+        core.play_voice_assistant_speech("Заявка успешно сформирована.")
+        core.context_clear()
